@@ -1,0 +1,8 @@
+[package]
+name = "rs-parser-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rs-parser = { path = ".." }
+structopt = "0.3"

@@ -1,0 +1,8 @@
+[workspace]
+members = [".", "rs-parser-cli"]
+resolver = "2"
+
+[package]
+name = "rs-parser"
+version = "0.1.0"
+edition = "2024"

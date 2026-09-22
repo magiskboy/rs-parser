@@ -1,0 +1,26 @@
+{
+    "name": "Nguyen Khac Thanh",
+    "age": 28,
+    "jobs": [
+        {"title": "Software Engineer"},
+        {"title": "DevOps"}
+    ],
+    "address": {
+        "country": "Viet Nam",
+        "city": "Ha Noi"
+    },
+    "is_married": true,
+    "has_child": false,
+    "house": null,
+    "extra": {
+        "case1": 10,
+        "case2": 10.1,
+        "case3": -10,
+        "case4": -10.1,
+        "case5": 10e10,
+        "case6": -10e10,
+        "case7": 10e-10,
+        "case8": -10e-10,
+        "escape_string": "line1\nline2\"\nline3"
+    }
+}
