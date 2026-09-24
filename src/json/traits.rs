@@ -1,9 +1,9 @@
-use crate::json::error::JsonParserError;
+use crate::json::{core::JsonValue, error::JsonParserError};
 
 pub trait Serializer {
     fn serialize(self) -> Result<String, JsonParserError>;
 }
 
 pub trait Deserializer {
-    fn deserializer<T>(value: &str) -> Result<T, JsonParserError>;
+    fn deserializer(value: &str) -> Result<JsonValue, JsonParserError>;
 }
