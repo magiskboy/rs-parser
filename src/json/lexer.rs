@@ -1,10 +1,12 @@
-use std::fmt::Display;
+use std::{error::Error, fmt::Display};
 
-use crate::json::{error::JsonParserError, lexer::LexerState::InTrue};
+use crate::json::error::JsonParserError;
 
 #[derive(Debug, Clone)]
-pub struct Lexer {
+pub struct Lexer<'a> {
     pub state: LexerState,
+    pub index: usize,
+    pub source: &'a str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -26,6 +28,9 @@ pub enum JsonTokenKind {
     Null,
     Colon,
     Comma,
+    Whitespace,
+    InvalidToken,
+    Stop,
 }
 
 impl Display for JsonTokenKind {
@@ -42,6 +47,9 @@ impl Display for JsonTokenKind {
             JsonTokenKind::Null => write!(f, "Null"),
             JsonTokenKind::Colon => write!(f, "Colon"),
             JsonTokenKind::Comma => write!(f, "Comma"),
+            JsonTokenKind::Whitespace => write!(f, "Whitespace"),
+            JsonTokenKind::InvalidToken => write!(f, "InvalidToken"),
+            JsonTokenKind::Stop => write!(f, "Stop"),
         }
     }
 }
@@ -67,341 +75,272 @@ const TRUE_LITERAL: &str = "true";
 const FALSE_LITERAL: &str = "false";
 const NULL_LITERAL: &str = "null";
 const ESCAPE_TOKENS: [&str; 8] = ["\\\"", "\\\\", "\\/", "\\b", "\\f", "\\n", "\\r", "\\t"];
+const SEPARATORS_LITERALS: [char; 11] = ['{', '}', ':', ',', ']', '[', ' ', ' ', '\n', '\t', '\r'];
 
-impl Lexer {
-    pub fn new() -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(source: &'a str) -> Self {
         Self {
             state: LexerState::NewToken,
+            source,
+            index: 0,
         }
     }
 
-    pub fn parse(&mut self, source: &str) -> Result<Vec<JsonToken>, JsonParserError> {
-        let mut tokens: Vec<JsonToken> = Vec::new();
-        let mut state = LexerState::NewToken;
-        let mut iter = source.char_indices();
-        let mut token: Option<(usize, char)> = iter.next();
-
-        while token.is_some() {
-            let (pos, c) = token.unwrap();
-            state = match state {
-                LexerState::NewToken => {
-                    token = iter.next();
-                    match c {
-                        '{' => {
-                            tokens.push(JsonToken {
-                                kind: JsonTokenKind::LBrace,
-                                span: Span {
-                                    start: pos,
-                                    end: pos + 1,
-                                },
-                            });
-                            LexerState::NewToken
-                        }
-                        '}' => {
-                            tokens.push(JsonToken {
-                                kind: JsonTokenKind::RBrace,
-                                span: Span {
-                                    start: pos,
-                                    end: pos + 1,
-                                },
-                            });
-                            LexerState::NewToken
-                        }
-                        '[' => {
-                            tokens.push(JsonToken {
-                                kind: JsonTokenKind::LBracket,
-                                span: Span {
-                                    start: pos,
-                                    end: pos + 1,
-                                },
-                            });
-                            LexerState::NewToken
-                        }
-                        ']' => {
-                            tokens.push(JsonToken {
-                                kind: JsonTokenKind::RBracket,
-                                span: Span {
-                                    start: pos,
-                                    end: pos + 1,
-                                },
-                            });
-                            LexerState::NewToken
-                        }
-                        ':' => {
-                            tokens.push(JsonToken {
-                                kind: JsonTokenKind::Colon,
-                                span: Span {
-                                    start: pos,
-                                    end: pos + 1,
-                                },
-                            });
-                            LexerState::NewToken
-                        }
-                        ',' => {
-                            tokens.push(JsonToken {
-                                kind: JsonTokenKind::Comma,
-                                span: Span {
-                                    start: pos,
-                                    end: pos + 1,
-                                },
-                            });
-                            LexerState::NewToken
-                        }
-                        '"' => LexerState::InString(Span {
-                            start: pos,
-                            end: pos + 1,
-                        }),
-                        't' => LexerState::InTrue(Span {
-                            start: pos,
-                            end: pos,
-                        }),
-                        'f' => LexerState::InFalse(Span {
-                            start: pos,
-                            end: pos,
-                        }),
-                        'n' => LexerState::InNull(Span {
-                            start: pos,
-                            end: pos,
-                        }),
-                        '0'..='9' | '-' => LexerState::InNumber(Span {
-                            start: pos,
-                            end: pos,
-                        }),
-                        ' ' | '\n' => continue, // Skip whitespace
-                        _ => LexerState::Invalid((
-                            String::new(),
-                            Span {
-                                start: pos,
-                                end: pos + 1,
-                            },
-                        )),
-                    }
-                }
-                LexerState::InString(span) => {
-                    let new_span = Span {
-                        start: span.start,
-                        end: pos + 1,
-                    };
-                    match c {
-                        '"' => {
-                            let apart = source.get(new_span.start..new_span.end).unwrap();
-                            if apart.ends_with('\\') {
-                                token = iter.next();
-                                LexerState::InString(new_span)
-                            } else {
-                                tokens.push(JsonToken {
-                                    kind: JsonTokenKind::String,
-                                    span: new_span,
-                                });
-                                token = iter.next();
-                                LexerState::NewToken
-                            }
-                        }
-                        _ => {
-                            token = iter.next();
-                            LexerState::InString(new_span)
-                        }
-                    }
-                }
-                LexerState::InNumber(span) => {
-                    let apart = source.get(span.start..span.end).unwrap();
-
-                    match c {
-                        '0'..'9' => {
-                            //TODO: handle leading zero
-                            token = iter.next();
-                            LexerState::InNumber(Span {
-                                start: span.start,
-                                end: pos,
-                            })
-                        }
-                        '-' => {
-                            if !apart.ends_with('.') && !apart.ends_with('-') {
-                                token = iter.next();
-                                LexerState::InNumber(Span {
-                                    start: span.start,
-                                    end: pos,
-                                })
-                            } else {
-                                token = iter.next();
-                                LexerState::Invalid((
-                                    String::from(apart),
-                                    Span {
-                                        start: pos,
-                                        end: pos + 1,
-                                    },
-                                ))
-                            }
-                        }
-                        'e' => {
-                            if !apart.ends_with('-') && !apart.contains('e') {
-                                token = iter.next();
-                                LexerState::InNumber(Span {
-                                    start: span.start,
-                                    end: pos,
-                                })
-                            } else {
-                                token = iter.next();
-                                LexerState::Invalid((
-                                    String::from(""),
-                                    Span {
-                                        start: pos,
-                                        end: pos + 1,
-                                    },
-                                ))
-                            }
-                        }
-                        '.' => {
-                            if !apart.ends_with('e')
-                                && !apart.ends_with('.')
-                                && !apart.ends_with('-')
-                            {
-                                token = iter.next();
-                                LexerState::InNumber(Span {
-                                    start: span.start,
-                                    end: pos,
-                                })
-                            } else {
-                                token = iter.next();
-                                LexerState::Invalid((
-                                    String::from(""),
-                                    Span {
-                                        start: pos,
-                                        end: pos + 1,
-                                    },
-                                ))
-                            }
-                        }
-                        _ => {
-                            tokens.push(JsonToken {
-                                kind: JsonTokenKind::Number,
-                                span: Span {
-                                    start: span.start,
-                                    end: pos,
-                                },
-                            });
-                            LexerState::NewToken
-                        }
-                    }
-                }
-                LexerState::InTrue(span) => {
-                    let new_span = Span {
-                        start: span.start,
-                        end: pos,
-                    };
-                    let t = source.get(new_span.start..new_span.end).unwrap();
-                    if t == TRUE_LITERAL {
-                        tokens.push(JsonToken {
-                            kind: JsonTokenKind::True,
-                            span: new_span,
-                        });
-                        LexerState::NewToken
-                    } else if TRUE_LITERAL.starts_with(&t) {
-                        token = iter.next();
-                        InTrue(new_span)
-                    } else {
-                        LexerState::Invalid((String::new(), new_span))
-                    }
-                }
-                LexerState::InFalse(span) => {
-                    let new_span = Span {
-                        start: span.start,
-                        end: pos,
-                    };
-                    let t = source.get(new_span.start..new_span.end).unwrap();
-                    if t == FALSE_LITERAL {
-                        tokens.push(JsonToken {
-                            kind: JsonTokenKind::False,
-                            span: new_span,
-                        });
-                        LexerState::NewToken
-                    } else if FALSE_LITERAL.starts_with(&t) {
-                        token = iter.next();
-                        LexerState::InFalse(new_span)
-                    } else {
-                        LexerState::Invalid((String::new(), new_span))
-                    }
-                }
-                LexerState::InNull(span) => {
-                    let new_span = Span {
-                        start: span.start,
-                        end: pos,
-                    };
-                    let t = source.get(new_span.start..new_span.end).unwrap();
-                    if t == NULL_LITERAL {
-                        tokens.push(JsonToken {
-                            kind: JsonTokenKind::Null,
-                            span: new_span,
-                        });
-                        LexerState::NewToken
-                    } else if NULL_LITERAL.starts_with(&t) {
-                        token = iter.next();
-                        LexerState::InNull(new_span)
-                    } else {
-                        LexerState::Invalid((String::new(), new_span))
-                    }
-                }
-                LexerState::Invalid((message, span)) => {
-                    let msg = format!("{} at {:?}", message, span);
-                    return Err(JsonParserError::LexicalError(msg));
-                }
-            };
+    pub fn next_token(&mut self) -> Result<JsonToken, JsonParserError> {
+        if self.index >= self.source.len() {
+            return Ok(JsonToken {
+                kind: JsonTokenKind::Stop,
+                span: Span {
+                    start: self.source.len(),
+                    end: self.source.len() + 1,
+                },
+            });
         }
 
-        // drain
-        match state {
-            LexerState::InNumber(span) => {
-                let content = source.get(span.start..span.end + 1).unwrap();
-                if let Ok(_) = content.parse::<f32>() {
-                    tokens.push(JsonToken {
-                        span: Span {
-                            start: span.start,
-                            end: span.end + 1,
+        let c = self.source.chars().nth(self.index).unwrap();
+        let pos = self.index;
+        let (token, next_index) = match c {
+            '{' => (
+                JsonToken {
+                    kind: JsonTokenKind::LBrace,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                pos + 1,
+            ),
+            '}' => (
+                JsonToken {
+                    kind: JsonTokenKind::RBrace,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                pos + 1,
+            ),
+            '[' => (
+                JsonToken {
+                    kind: JsonTokenKind::LBracket,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                pos + 1,
+            ),
+            ']' => (
+                JsonToken {
+                    kind: JsonTokenKind::RBracket,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                pos + 1,
+            ),
+            ':' => (
+                JsonToken {
+                    kind: JsonTokenKind::Colon,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                pos + 1,
+            ),
+            ',' => (
+                JsonToken {
+                    kind: JsonTokenKind::Comma,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                pos + 1,
+            ),
+            ' ' | '\n' | '\r' | '\t' => (
+                JsonToken {
+                    kind: JsonTokenKind::Whitespace,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                pos + 1,
+            ),
+            '"' => self.parse_string()?,
+            't' => self.parse_true()?,
+            'f' => self.parse_false()?,
+            'n' => self.parse_null()?,
+            '0'..='9' | '-' => self.parse_number()?,
+            _ => (
+                JsonToken {
+                    kind: JsonTokenKind::InvalidToken,
+                    span: Span {
+                        start: pos,
+                        end: pos + 1,
+                    },
+                },
+                0,
+            ),
+        };
+
+        if token.kind == JsonTokenKind::InvalidToken {
+            return Err(JsonParserError::LexicalError(String::from(
+                "invalid character",
+            )));
+        }
+
+        self.index = next_index;
+        Ok(token)
+    }
+
+    fn parse_true(&self) -> Result<(JsonToken, usize), JsonParserError> {
+        let span = self.get_candicate_span(self.index);
+
+        if self.get_str(&span) == Some(TRUE_LITERAL) {
+            return Ok((
+                JsonToken {
+                    kind: JsonTokenKind::True,
+                    span,
+                },
+                span.end,
+            ));
+        }
+        Err(JsonParserError::LexicalError(String::from(
+            "Invalid character",
+        )))
+    }
+
+    fn parse_false(&self) -> Result<(JsonToken, usize), JsonParserError> {
+        let span = self.get_candicate_span(self.index);
+
+        if self.get_str(&span) == Some(FALSE_LITERAL) {
+            return Ok((
+                JsonToken {
+                    kind: JsonTokenKind::False,
+                    span,
+                },
+                span.end,
+            ));
+        }
+        Err(JsonParserError::LexicalError(String::from(
+            "Invalid character",
+        )))
+    }
+
+    fn parse_null(&self) -> Result<(JsonToken, usize), JsonParserError> {
+        let span = self.get_candicate_span(self.index);
+
+        if self.get_str(&span) == Some(NULL_LITERAL) {
+            return Ok((
+                JsonToken {
+                    kind: JsonTokenKind::Null,
+                    span,
+                },
+                span.end,
+            ));
+        }
+        Err(JsonParserError::LexicalError(String::from(
+            "Invalid character",
+        )))
+    }
+
+    fn parse_number(&self) -> Result<(JsonToken, usize), JsonParserError> {
+        let span = self.get_candicate_span(self.index);
+
+        match self.get_str(&span) {
+            Some(value) => {
+                if Self::validate_json_number(value) {
+                    return Ok((
+                        JsonToken {
+                            kind: JsonTokenKind::Number,
+                            span,
                         },
-                        kind: JsonTokenKind::Number,
-                    });
+                        span.end,
+                    ));
                 }
+
+                return Err(JsonParserError::LexicalError(String::from(
+                    "invalid number",
+                )));
             }
-            LexerState::InNull(span) => {
-                let content = source.get(span.start..span.end + 1).unwrap();
-                if content == "null" {
-                    tokens.push(JsonToken {
+
+            None => {
+                return Err(JsonParserError::LexicalError(String::from(
+                    "Invalid number",
+                )));
+            }
+        }
+    }
+
+    fn parse_string(&mut self) -> Result<(JsonToken, usize), JsonParserError> {
+        let mut n_backslash = 0;
+        for i in (self.index + 1)..self.source.len() {
+            let c = self.source.chars().nth(i).unwrap();
+            if c == '\\' {
+                n_backslash += 1;
+            }
+            if c == '"'
+                && (self.source.chars().nth(i - 1).unwrap() != '\\'
+                    || (self.source.chars().nth(i - 1).unwrap() == '\\' && n_backslash % 2 == 0))
+            {
+                return Ok((
+                    JsonToken {
+                        kind: JsonTokenKind::String,
                         span: Span {
-                            start: span.start,
-                            end: span.end + 1,
+                            start: self.index,
+                            end: i + 1,
                         },
-                        kind: JsonTokenKind::Null,
-                    });
-                }
+                    },
+                    i + 1,
+                ));
             }
-            LexerState::InTrue(span) => {
-                let content = source.get(span.start..span.end + 1).unwrap();
-                if content == "true" {
-                    tokens.push(JsonToken {
-                        span: Span {
-                            start: span.start,
-                            end: span.end + 1,
-                        },
-                        kind: JsonTokenKind::True,
-                    });
-                }
+        }
+
+        Err(JsonParserError::LexicalError(String::from(
+            "invalid string",
+        )))
+    }
+
+    pub fn parse(&mut self) -> Result<Vec<JsonToken>, JsonParserError> {
+        let mut tokens: Vec<JsonToken> = vec![];
+
+        loop {
+            let token = self.next_token()?;
+            if token.kind == JsonTokenKind::Whitespace {
+                continue;
             }
-            LexerState::InFalse(span) => {
-                let content = source.get(span.start..span.end + 1).unwrap();
-                if content == "false" {
-                    tokens.push(JsonToken {
-                        span: Span {
-                            start: span.start,
-                            end: span.end + 1,
-                        },
-                        kind: JsonTokenKind::False,
-                    });
-                }
+            if token.kind == JsonTokenKind::Stop {
+                break;
             }
-            _ => {}
+            Lexer::print_token_with_value(token.clone(), self.source);
+            tokens.push(token);
         }
 
         Ok(tokens)
+    }
+
+    fn validate_json_number(value: &str) -> bool {
+        return true;
+    }
+
+    fn get_str(&self, span: &Span) -> Option<&str> {
+        self.source.get(span.start..span.end)
+    }
+
+    fn get_candicate_span(&self, start: usize) -> Span {
+        for end in start..self.source.len() {
+            if SEPARATORS_LITERALS.contains(&self.source.chars().nth(end).unwrap()) {
+                return Span { start, end };
+            }
+        }
+        Span {
+            start,
+            end: self.source.len(),
+        }
     }
 
     pub fn print_token_with_value(token: JsonToken, source: &str) {
@@ -456,6 +395,12 @@ impl Lexer {
                 "<kind={}, start={}, end={} />",
                 token.kind, token.span.start, token.span.end
             ),
+            JsonTokenKind::Stop => format!("<kind = {} />", token.kind,),
+            JsonTokenKind::InvalidToken => format!("<kind = {} />", token.kind,),
+            JsonTokenKind::Whitespace => format!(
+                "<kind {}, start={}, end={} />",
+                token.kind, token.span.start, token.span.end,
+            ),
         };
         println!("{}", output);
     }
@@ -469,8 +414,8 @@ mod test {
     };
 
     fn run(source: &str) -> Result<Vec<JsonToken>, JsonParserError> {
-        let mut lexer = Lexer::new();
-        lexer.parse(source)
+        let mut lexer = Lexer::new(source);
+        lexer.parse()
     }
 
     fn tok(kind: JsonTokenKind, start: usize, end: usize) -> JsonToken {

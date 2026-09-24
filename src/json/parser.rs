@@ -198,8 +198,8 @@ mod test {
     use std::collections::HashMap;
 
     fn parse(source: &str) -> Result<JsonValue, JsonParserError> {
-        let mut lexer = Lexer::new();
-        let tokens = lexer.parse(source)?;
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.parse()?;
         for t in tokens.clone() {
             Lexer::print_token_with_value(t, source);
         }

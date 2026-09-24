@@ -83,14 +83,15 @@ impl Serializer for JsonValue {
 
 impl Deserializer for JsonValue {
     fn deserializer(source: &str) -> Result<JsonValue, JsonParserError> {
-        let mut lexer = Lexer::new();
+        let mut lexer = Lexer::new(source);
         let tokens = lexer
-            .parse(source)
-            .map_err(|_| JsonParserError::ParserError(String::from("at lexical")))?;
+            .parse()
+            .map_err(|err| JsonParserError::ParserError(String::from(err.to_string())))?;
 
-        let mut parser = JsonParser::new(&tokens, source);
-        let value = parser.parse()?;
-        Ok(value)
+        Ok(JsonValue::Null)
+        // let mut parser = JsonParser::new(&tokens, source);
+        // let value = parser.parse()?;
+        // Ok(value)
     }
 }
 
@@ -176,9 +177,6 @@ mod test {
         hs.insert(String::from("key2"), item.clone());
         let value = super::JsonValue::Object(hs);
         let serialized = value.clone().serialize().unwrap();
-        assert_eq!(
-            super::JsonValue::deserializer(&serialized).unwrap(),
-            value
-        );
+        assert_eq!(super::JsonValue::deserializer(&serialized).unwrap(), value);
     }
 }
