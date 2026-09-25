@@ -1,25 +1,36 @@
 use std::collections::HashMap;
 
 use crate::json::{
-    core::JsonValue,
     error::JsonParserError,
-    lexer::{JsonToken, JsonTokenKind},
+    lexer::Lexer,
+    token::{JsonToken, JsonTokenKind},
+    value::JsonValue,
 };
 
 #[derive(Debug, Clone)]
 pub struct JsonParser<'a> {
-    pub current_token_idx: usize,
-    pub source: &'a str,
-    pub tokens: &'a [JsonToken],
+    current_token_idx: usize,
+    source: &'a str,
+    tokens: &'a [JsonToken],
 }
 
 impl<'a> JsonParser<'a> {
-    pub fn parse(&mut self) -> Result<JsonValue, JsonParserError> {
-        if self.tokens.is_empty() {
+    pub fn parse(source: &str) -> Result<JsonValue, JsonParserError> {
+        let tokens = Lexer::tokenize(source)?;
+        if tokens.is_empty() {
             return Err(JsonParserError::ParserError(String::from("json is empty")));
         }
 
-        self.parse_value()
+        let mut parser = JsonParser::new(&tokens, source);
+        parser.parse_value()
+    }
+
+    pub fn new(tokens: &'a [JsonToken], source: &'a str) -> Self {
+        Self {
+            current_token_idx: 0,
+            source,
+            tokens,
+        }
     }
 
     fn parse_object(&mut self) -> Result<JsonValue, JsonParserError> {
@@ -126,14 +137,6 @@ impl<'a> JsonParser<'a> {
         Ok(token.clone())
     }
 
-    pub fn new(tokens: &'a [JsonToken], source: &'a str) -> Self {
-        Self {
-            current_token_idx: 0,
-            source,
-            tokens,
-        }
-    }
-
     fn next_token(&mut self) -> Result<usize, JsonParserError> {
         if self.current_token_idx == self.tokens.len() - 1 {
             return Err(JsonParserError::ParserError(String::from(
@@ -194,17 +197,11 @@ impl<'a> JsonParser<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::json::{core::JsonValue, error::JsonParserError, lexer::Lexer, parser::JsonParser};
+    use crate::json::{JsonValue, error::JsonParserError, parser::JsonParser};
     use std::collections::HashMap;
 
     fn parse(source: &str) -> Result<JsonValue, JsonParserError> {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.parse()?;
-        for t in tokens.clone() {
-            Lexer::print_token_with_value(t, source);
-        }
-        let mut parser = JsonParser::new(&tokens, source);
-        parser.parse()
+        JsonParser::parse(source)
     }
 
     #[test]
